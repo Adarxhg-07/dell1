@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Crypto Price Predictor</title>
+    <!-- Tailwind CSS via CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Chart.js via CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- Google Fonts: Inter -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        /* Custom styles for chart and loader */
+        .loader {
+            border: 5px solid #f3f3f3;
+            border-top: 5px solid #3498db;
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .chart-container {
+            position: relative;
+            height: 50vh;
+            width: 100%;
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-white antialiased">
+
+    <div class="container mx-auto px-4 py-8 md:py-12">
+
+        <!-- Header -->
+        <header class="text-center mb-8 md:mb-12">
+            <h1 class="text-4xl md:text-5xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-purple-500">
+                Crypto Price Predictor
+            </h1>
+            <p class="mt-4 text-lg text-gray-400">
+                Using AI to forecast the next day's cryptocurrency prices.
+            </p>
+        </header>
+
+        <main class="max-w-4xl mx-auto">
+            <!-- Controls Card -->
+            <div class="bg-gray-800 rounded-xl shadow-lg p-6 mb-8">
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6 items-end">
+                    <!-- Crypto Selector -->
+                    <div>
+                        <label for="crypto-select" class="block mb-2 text-sm font-medium text-gray-300">Select Cryptocurrency</label>
+                        <select id="crypto-select" class="w-full bg-gray-700 border border-gray-600 text-white text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block p-2.5">
+                            <option value="bitcoin">Bitcoin (BTC)</option>
+                            <option value="ethereum">Ethereum (ETH)</option>
+                            <option value="solana">Solana (SOL)</option>
+                            <option value="cardano">Cardano (ADA)</option>
+                            <option value="dogecoin">Dogecoin (DOGE)</option>
+                        </select>
+                    </div>
+                    <!-- Predict Button -->
+                    <button id="predict-btn" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 px-4 rounded-lg transition duration-300 ease-in-out transform hover:scale-105 focus:outline-none focus:ring-4 focus:ring-blue-800">
+                        Predict Next Day's Price
+                    </button>
+                </div>
+            </div>
+
+            <!-- Results Section -->
+            <div id="results-container" class="space-y-8">
+                <!-- Status/Message Area -->
+                <div id="status-area" class="text-center p-4 min-h-[80px] flex items-center justify-center">
+                    <p id="status-text" class="text-gray-500 text-lg">Select a crypto and click predict to see the magic.</p>
+                    <div id="loader" class="loader hidden"></div>
+                </div>
+
+                <!-- Prediction Card -->
+                <div id="prediction-card" class="bg-gray-800 rounded-xl shadow-lg p-6 hidden">
+                     <h2 class="text-lg font-semibold text-gray-400 mb-2">Predicted Price for Tomorrow</h2>
+                     <p id="prediction-text" class="text-4xl font-bold text-green-400"></p>
+                </div>
+
+                <!-- Chart Card -->
+                <div class="bg-gray-800 rounded-xl shadow-lg p-4 md:p-6">
+                    <h2 class="text-xl font-semibold text-center mb-4">Historical Price Chart</h2>
+                    <div class="chart-container">
+                        <canvas id="priceChart"></canvas>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        // --- DOM Element References ---
+        const cryptoSelect = document.getElementById('crypto-select');
+        const predictBtn = document.getElementById('predict-btn');
+        const statusText = document.getElementById('status-text');
+        const loader = document.getElementById('loader');
+        const predictionCard = document.getElementById('prediction-card');
+        const predictionText = document.getElementById('prediction-text');
+        const chartCanvas = document.getElementById('priceChart');
+
+        // --- Chart.js Instance ---
+        let priceChart = null;
+
+        // --- API Configuration ---
+        const API_URL = 'http://127.0.0.1:5000/predict';
+
+        // --- Functions ---
+
+        /**
+         * Updates the UI to show a loading state.
+         * @param {string} cryptoName - The name of the crypto being fetched.
+         */
+        function showLoadingState(cryptoName) {
+            statusText.textContent = `Predicting price for ${cryptoName}...`;
+            statusText.classList.remove('hidden');
+            loader.classList.remove('hidden');
+            predictBtn.disabled = true;
+            predictBtn.classList.add('opacity-50', 'cursor-not-allowed');
+            predictionCard.classList.add('hidden');
+        }
+
+        /**
+         * Hides the loading state and re-enables the prediction button.
+         */
+        function hideLoadingState() {
+            statusText.classList.add('hidden');
+            loader.classList.add('hidden');
+            predictBtn.disabled = false;
+            predictBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+        }
+
+        /**
+         * Renders or updates the price chart with new data.
+         * @param {string} cryptoName - The name of the cryptocurrency.
+         * @param {Array} historicalData - Array of {date, price} objects.
+         * @param {number} predictedPrice - The predicted price.
+         */
+        function renderChart(cryptoName, historicalData, predictedPrice) {
+            const labels = historicalData.map(d => d.date);
+            const prices = historicalData.map(d => d.price);
+
+            // Add the prediction date (tomorrow) to the labels
+            const lastDate = new Date(labels[labels.length - 1]);
+            lastDate.setDate(lastDate.getDate() + 1);
+            const predictionLabel = lastDate.toISOString().split('T')[0];
+            labels.push(predictionLabel);
+
+            // Prepare data for the prediction point
+            const predictionData = new Array(prices.length).fill(null);
+            predictionData.push(predictedPrice);
+            
+            // Create a point that connects the last historical price to the prediction
+            const connectionPointData = new Array(prices.length - 1).fill(null);
+            connectionPointData.push(prices[prices.length-1], predictedPrice);
+
+
+            const ctx = chartCanvas.getContext('2d');
+
+            if (priceChart) {
+                priceChart.destroy();
+            }
+
+            priceChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: `${cryptoName} Historical Price (USD)`,
+                        data: prices,
+                        borderColor: 'rgb(59, 130, 246)',
+                        backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                        borderWidth: 2,
+                        tension: 0.1,
+                        fill: true,
+                    },
+                    {
+                        label: 'Prediction',
+                        data: predictionData,
+                        borderColor: 'rgb(22, 163, 74)',
+                        backgroundColor: 'rgb(34, 197, 94)',
+                        pointRadius: 6,
+                        pointHoverRadius: 8,
+                        showLine: false
+                    },
+                     {
+                        label: 'Prediction Line',
+                        data: connectionPointData,
+                        borderColor: 'rgb(22, 163, 74)',
+                        borderWidth: 2,
+                        borderDash: [5, 5],
+                        fill: false,
+                        pointRadius: 0
+                    }
+                ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: {
+                            beginAtZero: false,
+                            ticks: { color: '#9CA3AF' },
+                            grid: { color: 'rgba(255, 255, 255, 0.1)' }
+                        },
+                        x: {
+                            ticks: { color: '#9CA3AF' },
+                            grid: { color: 'rgba(255, 255, 255, 0.1)' }
+                        }
+                    },
+                    plugins: {
+                        legend: {
+                            display: false
+                        }
+                    }
+                }
+            });
+        }
+
+
+        /**
+         * Handles the prediction process when the button is clicked.
+         */
+        async function handlePrediction() {
+            const selectedCryptoId = cryptoSelect.value;
+            const selectedCryptoName = cryptoSelect.options[cryptoSelect.selectedIndex].text;
+
+            showLoadingState(selectedCryptoName);
+
+            try {
+                const response = await fetch(API_URL, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ crypto_id: selectedCryptoId }),
+                });
+
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+                }
+
+                const data = await response.json();
+
+                // Update UI with results
+                predictionText.textContent = `$${data.predicted_price.toLocaleString()}`;
+                predictionCard.classList.remove('hidden');
+
+                // Render the chart
+                renderChart(selectedCryptoName, data.historical_data, data.predicted_price);
+
+            } catch (error) {
+                console.error('Prediction error:', error);
+                statusText.textContent = `Error: ${error.message}. Please check if the backend is running.`;
+                statusText.classList.remove('hidden');
+                if (priceChart) priceChart.destroy(); // Clear old chart on error
+            } finally {
+                // Ensure loading state is always hidden after the process
+                hideLoadingState();
+            }
+        }
+
+        // --- Event Listeners ---
+        predictBtn.addEventListener('click', handlePrediction);
+
+    </script>
+</body>
+</html>
